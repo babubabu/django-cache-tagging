@@ -90,8 +90,11 @@ class CacheTagging(object):
         if data is None:
             return default
 
-        if 'tag_versions' not in data or 'value' not in data:
-            return data  # Returns native API
+        try:
+            if 'tag_versions' not in data or 'value' not in data:
+                return data  # Returns native API
+        except:
+            return data
 
         if len(data['tag_versions']):
             tag_caches = self.cache.get_many(
