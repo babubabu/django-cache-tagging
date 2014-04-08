@@ -1,10 +1,12 @@
+from __future__ import absolute_import, unicode_literals
 import hashlib
+import collections
 from django.conf import settings
 from django.utils.http import http_date
 from django.utils.cache import cc_delim_re, _generate_cache_key,\
     _generate_cache_header_key
 
-from cache_tagging import get_cache
+from . import get_cache
 
 
 def prevent_cache_page(request):
@@ -13,7 +15,7 @@ def prevent_cache_page(request):
 
 
 def _set_response_etag(response):  # Compatible with Django 1.3
-    response['ETag'] = '"%s"' % hashlib.md5(response.content).hexdigest()
+    response['ETag'] = '"{0}"'.format(hashlib.md5(response.content).hexdigest())
     return response
 
 
@@ -32,13 +34,14 @@ def patch_response_headers(response, cache_timeout=None):
     if cache_timeout < 0:
         cache_timeout = 0 # Can't have max-age negative
     if settings.USE_ETAGS and not response.has_header('ETag'):
-        if hasattr(response, 'render') and callable(response.render):
+        if hasattr(response, 'render') and isinstance(response.render, collections.Callable):
             response.add_post_render_callback(_set_response_etag)
         else:
             response = _set_response_etag(response)
-    if not response.has_header('Last-Modified'):
-        response['Last-Modified'] = http_date()
     # patch start
+    # Fixed issue #2
+    # if not response.has_header('Last-Modified'):
+    #     response['Last-Modified'] = http_date()
     # We don't know, when cache will be invalid. So, skip http expires.
     # if not response.has_header('Expires'):
     #     response['Expires'] = http_date(time.time() + cache_timeout)

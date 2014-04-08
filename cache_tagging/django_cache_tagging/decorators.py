@@ -1,48 +1,68 @@
-from functools import wraps
-
+from __future__ import absolute_import, unicode_literals
 from django.utils.decorators import decorator_from_middleware_with_args
 
-from cache_tagging import get_cache, cache
-from cache_tagging.middleware import CacheMiddleware
+from ..tagging import CacheTagging
+from . import cache
+from .middleware import CacheMiddleware
+import collections
 
 
-def cache_transaction(f):
+def cache_transaction(f=None, cache=None):
     """Decorator for any callback,
 
     that automatically handles database transactions."""
-    @wraps(f)
-    def wrapper(*args, **kwargs):
-        cache_alias = kwargs.pop('cache', None)
-        if cache_alias:
-            cache = get_cache(cache_alias)
-        else:
-            cache = globals()['cache']
-        cache.transaction_begin()
-        result = f(*args, **kwargs)
-        cache.transaction_finish()
-        return result
-    return wrapper
+    import warnings
+    warnings.warn(
+        "Decorators @cache_transaction is deprecated.  Use @cache.transaction instead",
+        PendingDeprecationWarning,
+        stacklevel=2
+    )
+    if not cache and isinstance(f, CacheTagging):
+        cache = f
+        f = None
+    elif not cache:
+        cache = globals()['cache']
+    if f:
+        return cache.transaction(f)
+    return cache.transaction
 
 
-def cache_transaction_all(f):
+def cache_transaction_all(f=None, cache=None):
     """Decorator for any callback,
 
     that automatically handles database transactions,
     and calls CacheTagging.transaction_finish_all() instead of
     CacheTagging.transaction_finish().
     So. It will handles all transaction's scopes."""
-    @wraps(f)
+    import warnings
+    warnings.warn(
+        "Decorators @cache_transaction_all is deprecated. Use cache.transaction.flush() instead",
+        PendingDeprecationWarning,
+        stacklevel=2
+    )
+    if not cache and isinstance(f, CacheTagging):
+        cache = f
+        f = None
+    elif not cache:
+        cache = globals()['cache']
+
     def wrapper(*args, **kwargs):
-        cache_alias = kwargs.pop('cache', None)
-        if cache_alias:
-            cache = get_cache(cache_alias)
-        else:
-            cache = globals()['cache']
-        cache.transaction_begin()
+        cache.transaction.begin()
         result = f(*args, **kwargs)
-        cache.transaction_finish_all()
+        cache.transaction.flush()
         return result
-    return wrapper
+
+    if f:
+        return wrapper
+
+    def wrapper_outer(f):
+        def wrapper(*args, **kwargs):
+            cache.transaction.begin()
+            result = f(*args, **kwargs)
+            cache.transaction.flush()
+            return result
+
+    return wrapper_outer
 
 
 def cache_page(*args, **kwargs):
@@ -82,6 +102,7 @@ def cache_page(*args, **kwargs):
     # patch start
     tags = kwargs.pop('tags', ())
     assert not kwargs, "The only keyword arguments are cache and key_prefix"
+
     def warn():
         import warnings
         warnings.warn('The cache_page decorator must be called like: '
@@ -92,14 +113,14 @@ def cache_page(*args, **kwargs):
     if len(args) > 1:
         assert len(args) == 2, "cache_page accepts at most 2 arguments"
         warn()
-        if callable(args[0]):
+        if isinstance(args[0], collections.Callable):
             return decorator_from_middleware_with_args(CacheMiddleware)(cache_timeout=args[1], cache_alias=cache_alias, key_prefix=key_prefix, tags=tags)(args[0])
-        elif callable(args[1]):
+        elif isinstance(args[1], collections.Callable):
             return decorator_from_middleware_with_args(CacheMiddleware)(cache_timeout=args[0], cache_alias=cache_alias, key_prefix=key_prefix, tags=tags)(args[1])
         else:
             assert False, "cache_page must be passed a view function if called with two arguments"
     elif len(args) == 1:
-        if callable(args[0]):
+        if isinstance(args[0], collections.Callable):
             warn()
             return decorator_from_middleware_with_args(CacheMiddleware)(cache_alias=cache_alias, key_prefix=key_prefix, tags=tags)(args[0])
         else:

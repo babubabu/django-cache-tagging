@@ -1,3 +1,4 @@
+from __future__ import absolute_import, unicode_literals
 """
 Cache middleware. If enabled, each Django-powered page will be cached based on
 URL. The canonical way to enable cache middleware is to set
@@ -47,12 +48,42 @@ More details about how the caching works:
   headers on the response object.
 
 """
-
+import collections
 from django.conf import settings
 from django.utils.cache import get_cache_key, get_max_age
 
-from cache_tagging import get_cache, DEFAULT_CACHE_ALIAS
-from cache_tagging.utils import patch_response_headers, learn_cache_key
+from . import get_cache, DEFAULT_CACHE_ALIAS
+from .utils import patch_response_headers, learn_cache_key
+
+
+class TransactionMiddleware(object):
+    """
+    Transaction middleware.
+    Used before django.middleware.transaction.TransactionMiddleware
+    in settings.MIDDLEWARE_CLASSES.
+    """
+    def __init__(self, **kwargs):
+        try:
+            self.cache_alias = kwargs['cache_alias']
+            if self.cache_alias is None:
+                self.cache_alias = DEFAULT_CACHE_ALIAS
+        except KeyError:
+            self.cache_alias = DEFAULT_CACHE_ALIAS
+            # self.cache_alias = settings.CACHE_MIDDLEWARE_ALIAS
+        self.cache = get_cache(self.cache_alias)
+
+    def process_request(self, request):
+        """Enters transaction management"""
+        self.cache.transaction.begin()
+
+    def process_exception(self, request, exception):
+        """Rolls back the database and leaves transaction management"""
+        self.cache.transaction.flush()
+
+    def process_response(self, request, response):
+        """Commits and leaves transaction management."""
+        self.cache.transaction.flush()
+        return response
 
 
 class UpdateCacheMiddleware(object):
@@ -111,7 +142,7 @@ class UpdateCacheMiddleware(object):
         tags = set()
         if self.tags:
             # Usefull to bind view, args and kwargs to request.
-            # See https://bitbucket.org/evotech/django-ext/src/d8b55d86680e/django_ext/middleware/view_args_to_request.py
+            # See https://bitbucket.org/emacsway/django-ext/src/d8b55d86680e/django_ext/middleware/view_args_to_request.py
             tags = self.tags(request)
         tags = set(tags)
         # Adds tags from request, see templatetag {% cache_add_tags ... %}
@@ -119,7 +150,7 @@ class UpdateCacheMiddleware(object):
             tags.update(request.cache_tagging)
         if timeout:
             cache_key = learn_cache_key(request, response, tags, timeout, self.key_prefix, cache=self.cache)  # patched
-            if hasattr(response, 'render') and callable(response.render):
+            if hasattr(response, 'render') and isinstance(response.render, collections.Callable):
                 response.add_post_render_callback(
                     lambda r: self.cache.set(cache_key, r, tags, timeout)  # patched
                 )
